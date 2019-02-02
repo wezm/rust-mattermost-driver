@@ -9,6 +9,7 @@ use url::{self, Url};
 use std::fmt;
 
 use crate::channel;
+use crate::post;
 use crate::team;
 use crate::user;
 
@@ -58,6 +59,18 @@ struct Login {
     token: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct UnixTimeMs(u64);
+
+#[derive(Serialize)]
+pub struct PaginationParameters {
+    page: usize,
+    per_page: usize,
+    since: Option<UnixTimeMs>,
+    before: Option<post::PostId>,
+    after: Option<post::PostId>,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ErrorBody {
     pub id: String,
@@ -71,16 +84,31 @@ pub struct UnauthenticatedClient {
     http: HttpClient,
 }
 
+#[derive(Clone)]
 struct SessionToken(String);
 
+#[derive(Clone)]
 struct HttpClient {
     base_url: Url,
     hyper: HyperClient<HttpsConnector<hyper::client::HttpConnector>, hyper::Body>,
 }
 
+#[derive(Clone)]
 pub struct Client {
     http: HttpClient,
     session_token: SessionToken,
+}
+
+impl Default for PaginationParameters {
+    fn default() -> Self {
+        PaginationParameters {
+            page: 0,
+            per_page: 60,
+            since: None,
+            before: None,
+            after: None,
+        }
+    }
 }
 
 impl SessionToken {
@@ -96,7 +124,11 @@ impl fmt::Debug for Client {
 }
 
 impl HttpClient {
-    fn post<B>(&self, path: &str, body: B) -> impl Future<Item = Response<Body>, Error = Error>
+    fn post_unauthenticated<B>(
+        &self,
+        path: &str,
+        body: B,
+    ) -> impl Future<Item = Response<Body>, Error = Error>
     where
         B: Into<Body>,
     {
@@ -107,6 +139,31 @@ impl HttpClient {
             .and_then(|(url, client)| {
                 eprintln!("POST {}", url.as_str());
                 let mut request = Request::post(url.as_str());
+
+                client
+                    .request(request.body(body.into()).expect("FIXME"))
+                    .map_err(Error::from)
+            })
+    }
+
+    fn post<B>(
+        &self,
+        path: &str,
+        session_token: &SessionToken,
+        body: B,
+    ) -> impl Future<Item = Response<Body>, Error = Error>
+    where
+        B: Into<Body>,
+    {
+        let request_url = self.base_url.join(path);
+        let authorization = format!("Bearer {}", session_token.as_str());
+
+        futures::future::ok(self.hyper.clone())
+            .and_then(|client| request_url.map(|url| (url, client)).map_err(Error::from))
+            .and_then(|(url, client)| {
+                eprintln!("POST {}", url.as_str());
+                let mut request = Request::post(url.as_str());
+                request.header(hyper::header::AUTHORIZATION, authorization);
 
                 client
                     .request(request.body(body.into()).expect("FIXME"))
@@ -172,11 +229,11 @@ impl UnauthenticatedClient {
 
         // Send request
         self.http
-            .post("users/login", serde_json::to_string(&body).unwrap())
-            .inspect(|res| {
-                eprintln!("Status:\n{}", res.status());
-                eprintln!("Headers:\n{:#?}", res.headers());
-            })
+            .post_unauthenticated("users/login", serde_json::to_string(&body).unwrap())
+            // .inspect(|res| {
+            //     eprintln!("Status:\n{}", res.status());
+            //     eprintln!("Headers:\n{:#?}", res.headers());
+            // })
             .and_then(|res| {
                 res.headers()
                     .get(TOKEN)
@@ -255,5 +312,52 @@ impl Client {
                 eprintln!("body = {}", b);
                 serde_json::from_slice::<Vec<channel::Channel>>(&body).map_err(Error::from)
             })
+    }
+
+    pub fn get_channel_posts(
+        &self,
+        channel_id: channel::ChannelId,
+        params: PaginationParameters,
+    ) -> impl Future<Item = post::PostCollection, Error = Error> {
+        self.http
+            .get(
+                &format!("channels/{}/posts", channel_id.as_str(),),
+                &self.session_token,
+            )
+            .inspect(|res| {
+                eprintln!("Status:\n{}", res.status());
+                eprintln!("Headers:\n{:#?}", res.headers());
+            })
+            .and_then(|res| res.into_body().concat2().map_err(Error::from))
+            .and_then(|body| {
+                let b = std::str::from_utf8(&body).unwrap();
+                eprintln!("body = {}", b);
+                serde_json::from_slice::<post::PostCollection>(&body).map_err(Error::from)
+            })
+    }
+
+    pub fn create_post(
+        &self,
+        post: post::CreatePost,
+    ) -> impl Future<Item = post::Post, Error = Error> {
+        // FIXME: Presumably there's a better way to do this (without cloning)
+        let http = self.http.clone();
+        let session_token = self.session_token.clone();
+
+        futures::future::result(serde_json::to_string(&post).map_err(Error::from)).and_then(
+            move |body| {
+                http.post("posts", &session_token, body)
+                    .inspect(|res| {
+                        eprintln!("Status:\n{}", res.status());
+                        eprintln!("Headers:\n{:#?}", res.headers());
+                    })
+                    .and_then(|res| res.into_body().concat2().map_err(Error::from))
+                    .and_then(|body| {
+                        let b = std::str::from_utf8(&body).unwrap();
+                        eprintln!("body = {}", b);
+                        serde_json::from_slice::<post::Post>(&body).map_err(Error::from)
+                    })
+            },
+        )
     }
 }

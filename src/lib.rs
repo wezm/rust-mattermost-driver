@@ -1,5 +1,7 @@
 pub mod channel;
 pub mod client;
+pub mod file;
+pub mod post;
 pub mod team;
 pub mod user;
 

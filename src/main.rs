@@ -3,9 +3,12 @@ extern crate mattermost_driver as mattermost;
 use std::env;
 
 use dotenv::dotenv;
-use futures::future::Future;
+use futures::future::{self, Future};
 
-use mattermost::{user::UserParam, Client, Error, UnauthenticatedClient};
+use mattermost::{
+    client::PaginationParameters, post::CreatePost, user::UserParam, Client, Error,
+    UnauthenticatedClient,
+};
 
 fn main() {
     dotenv().ok();
@@ -23,11 +26,39 @@ fn main() {
     let work = client.authenticate(login_id, password, None);
     let client = rt.block_on(work).expect("error logging in");
 
-    let work = client.get_user_teams(UserParam::Me).and_then(move |teams| {
-        let team = teams.first().expect("no teams");
-        client.get_team_channels_for_user(&team.id, UserParam::Me)
-    });
+    let work = futures::future::ok(client.clone())
+        .and_then(|client| {
+            client
+                .get_user_teams(UserParam::Me)
+                .map(|teams| (client, teams))
+        })
+        .and_then(|(client, teams)| {
+            let team = teams.first().expect("no teams");
+            client
+                .get_team_channels_for_user(&team.id, UserParam::Me)
+                .map(|channels| (client, channels))
+        })
+        .and_then(|(client, mut channels)| {
+            // Find geeks channel
+            let index = channels
+                .iter()
+                .position(|channel| channel.name == "geeks")
+                .unwrap();
+            let geeks = channels.remove(index);
 
-    let channels = rt.block_on(work).expect("error logging in");
-    dbg!(channels);
+            // Get posts
+            // let params = PaginationParameters::default();
+            // client.get_channel_posts(geeks.id, params)
+
+            // Post message
+            let post = CreatePost {
+                channel_id: geeks.id,
+                message: "Hello from :rust:".to_string(),
+                root_id: None,
+                file_ids: None,
+            };
+            client.create_post(post)
+        });
+
+    rt.block_on(work).expect("future error");
 }

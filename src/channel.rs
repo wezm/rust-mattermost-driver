@@ -24,3 +24,9 @@ pub struct Channel {
     // Deprecated in Mattermost 5.0 release
     pub creator_id: String,
 }
+
+impl ChannelId {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
