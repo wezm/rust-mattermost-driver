@@ -3,8 +3,9 @@ extern crate mattermost_driver as mattermost;
 use std::env;
 
 use dotenv::dotenv;
+use futures::future::Future;
 
-use mattermost::{Client, Error, UnauthenticatedClient};
+use mattermost::{user::UserParam, Client, Error, UnauthenticatedClient};
 
 fn main() {
     dotenv().ok();
@@ -19,8 +20,14 @@ fn main() {
 
     let mut rt = tokio::runtime::Runtime::new().unwrap();
 
-    let client = client.authenticate(login_id, password, None);
-    let client = rt.block_on(client);
+    let work = client.authenticate(login_id, password, None);
+    let client = rt.block_on(work).expect("error logging in");
 
-    eprintln!("Client = {:?}", client);
+    let work = client.get_user_teams(UserParam::Me).and_then(move |teams| {
+        let team = teams.first().expect("no teams");
+        client.get_team_channels_for_user(&team.id, UserParam::Me)
+    });
+
+    let channels = rt.block_on(work).expect("error logging in");
+    dbg!(channels);
 }

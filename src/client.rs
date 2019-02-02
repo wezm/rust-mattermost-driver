@@ -8,6 +8,8 @@ use url::{self, Url};
 
 use std::fmt;
 
+use crate::channel;
+use crate::team;
 use crate::user;
 
 const DNS_WORKER_THREADS: usize = 4;
@@ -43,6 +45,12 @@ impl From<hyper::Error> for Error {
     }
 }
 
+impl From<serde_json::Error> for Error {
+    fn from(error: serde_json::Error) -> Self {
+        Error::Json(error)
+    }
+}
+
 #[derive(Serialize)]
 struct Login {
     login_id: String,
@@ -75,6 +83,12 @@ pub struct Client {
     session_token: SessionToken,
 }
 
+impl SessionToken {
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
 impl fmt::Debug for Client {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "MattermostClient")
@@ -96,6 +110,27 @@ impl HttpClient {
 
                 client
                     .request(request.body(body.into()).expect("FIXME"))
+                    .map_err(Error::from)
+            })
+    }
+
+    fn get(
+        &self,
+        path: &str,
+        session_token: &SessionToken,
+    ) -> impl Future<Item = Response<Body>, Error = Error> {
+        let request_url = self.base_url.join(path);
+        let authorization = format!("Bearer {}", session_token.as_str());
+
+        futures::future::ok(self.hyper.clone())
+            .and_then(|client| request_url.map(|url| (url, client)).map_err(Error::from))
+            .and_then(|(url, client)| {
+                eprintln!("GET {}", url.as_str());
+                let mut request = Request::get(url.as_str());
+                request.header(hyper::header::AUTHORIZATION, authorization);
+
+                client
+                    .request(request.body(Body::empty()).expect("FIXME"))
                     .map_err(Error::from)
             })
     }
@@ -170,6 +205,55 @@ impl UnauthenticatedClient {
                     http: self.http,
                     session_token: SessionToken(token),
                 })
+            })
+    }
+}
+
+impl Client {
+    pub fn get_user_teams(
+        &self,
+        user_id: user::UserParam,
+    ) -> impl Future<Item = Vec<team::Team>, Error = Error> {
+        self.http
+            .get(
+                &format!("users/{}/teams", user_id.as_str()),
+                &self.session_token,
+            )
+            .inspect(|res| {
+                eprintln!("Status:\n{}", res.status());
+                eprintln!("Headers:\n{:#?}", res.headers());
+            })
+            .and_then(|res| res.into_body().concat2().map_err(Error::from))
+            .and_then(|body| {
+                let b = std::str::from_utf8(&body).unwrap();
+                eprintln!("body = {}", b);
+                serde_json::from_slice::<Vec<team::Team>>(&body).map_err(Error::from)
+            })
+    }
+
+    pub fn get_team_channels_for_user(
+        &self,
+        team_id: &team::TeamId,
+        user_id: user::UserParam,
+    ) -> impl Future<Item = Vec<channel::Channel>, Error = Error> {
+        self.http
+            .get(
+                &format!(
+                    "users/{}/teams/{}/channels",
+                    user_id.as_str(),
+                    team_id.as_str()
+                ),
+                &self.session_token,
+            )
+            .inspect(|res| {
+                eprintln!("Status:\n{}", res.status());
+                eprintln!("Headers:\n{:#?}", res.headers());
+            })
+            .and_then(|res| res.into_body().concat2().map_err(Error::from))
+            .and_then(|body| {
+                let b = std::str::from_utf8(&body).unwrap();
+                eprintln!("body = {}", b);
+                serde_json::from_slice::<Vec<channel::Channel>>(&body).map_err(Error::from)
             })
     }
 }

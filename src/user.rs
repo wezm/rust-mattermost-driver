@@ -1,8 +1,17 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct UserId(String);
+
+#[derive(Serialize, Deserialize, Debug)]
+pub enum UserParam {
+    Me,
+    Id(UserId),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct User {
-    pub id: String,
+    pub id: UserId,
     pub create_at: i64,
     pub update_at: i64,
     pub delete_at: i64,
@@ -45,6 +54,15 @@ pub struct UserNotifyProps {
     pub channel: bool,
     #[serde(with = "string_boolean")]
     pub first_name: bool,
+}
+
+impl UserParam {
+    pub fn as_str(&self) -> &str {
+        match self {
+            UserParam::Me => "me",
+            UserParam::Id(UserId(ref id)) => id.as_str(),
+        }
+    }
 }
 
 mod string_boolean {

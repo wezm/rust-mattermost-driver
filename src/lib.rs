@@ -1,5 +1,7 @@
-mod client;
-mod user;
+pub mod channel;
+pub mod client;
+pub mod team;
+pub mod user;
 
 pub use crate::client::Client;
 pub use crate::client::Error;
