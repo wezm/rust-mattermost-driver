@@ -47,17 +47,17 @@ fn main() {
             let geeks = channels.remove(index);
 
             // Get posts
-            // let params = PaginationParameters::default();
-            // client.get_channel_posts(geeks.id, params)
+            let params = PaginationParameters::default();
+            client.get_channel_posts(geeks.id, params)
 
             // Post message
-            let post = CreatePost {
-                channel_id: geeks.id,
-                message: "Hello from :rust:".to_string(),
-                root_id: None,
-                file_ids: None,
-            };
-            client.create_post(post)
+            // let post = CreatePost {
+            //     channel_id: geeks.id,
+            //     message: "Hello from :rust: (https://git.sr.ht/~wezm/rust-mattermost-driver)".to_string(),
+            //     root_id: None,
+            //     file_ids: None,
+            // };
+            // client.create_post(post)
         });
 
     rt.block_on(work).expect("future error");

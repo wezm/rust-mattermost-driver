@@ -2,7 +2,7 @@ use futures::{Future, Stream};
 use hyper;
 use hyper::{Body, Client as HyperClient, Request, Response, StatusCode, Uri};
 use hyper_rustls::HttpsConnector;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json;
 use url::{self, Url};
 
@@ -271,21 +271,7 @@ impl Client {
         &self,
         user_id: user::UserParam,
     ) -> impl Future<Item = Vec<team::Team>, Error = Error> {
-        self.http
-            .get(
-                &format!("users/{}/teams", user_id.as_str()),
-                &self.session_token,
-            )
-            .inspect(|res| {
-                eprintln!("Status:\n{}", res.status());
-                eprintln!("Headers:\n{:#?}", res.headers());
-            })
-            .and_then(|res| res.into_body().concat2().map_err(Error::from))
-            .and_then(|body| {
-                let b = std::str::from_utf8(&body).unwrap();
-                eprintln!("body = {}", b);
-                serde_json::from_slice::<Vec<team::Team>>(&body).map_err(Error::from)
-            })
+        self.get(&format!("users/{}/teams", user_id.as_str()))
     }
 
     pub fn get_team_channels_for_user(
@@ -293,47 +279,19 @@ impl Client {
         team_id: &team::TeamId,
         user_id: user::UserParam,
     ) -> impl Future<Item = Vec<channel::Channel>, Error = Error> {
-        self.http
-            .get(
-                &format!(
-                    "users/{}/teams/{}/channels",
-                    user_id.as_str(),
-                    team_id.as_str()
-                ),
-                &self.session_token,
-            )
-            .inspect(|res| {
-                eprintln!("Status:\n{}", res.status());
-                eprintln!("Headers:\n{:#?}", res.headers());
-            })
-            .and_then(|res| res.into_body().concat2().map_err(Error::from))
-            .and_then(|body| {
-                let b = std::str::from_utf8(&body).unwrap();
-                eprintln!("body = {}", b);
-                serde_json::from_slice::<Vec<channel::Channel>>(&body).map_err(Error::from)
-            })
+        self.get(&format!(
+            "users/{}/teams/{}/channels",
+            user_id.as_str(),
+            team_id.as_str()
+        ))
     }
 
     pub fn get_channel_posts(
         &self,
         channel_id: channel::ChannelId,
-        params: PaginationParameters,
+        _params: PaginationParameters,
     ) -> impl Future<Item = post::PostCollection, Error = Error> {
-        self.http
-            .get(
-                &format!("channels/{}/posts", channel_id.as_str(),),
-                &self.session_token,
-            )
-            .inspect(|res| {
-                eprintln!("Status:\n{}", res.status());
-                eprintln!("Headers:\n{:#?}", res.headers());
-            })
-            .and_then(|res| res.into_body().concat2().map_err(Error::from))
-            .and_then(|body| {
-                let b = std::str::from_utf8(&body).unwrap();
-                eprintln!("body = {}", b);
-                serde_json::from_slice::<post::PostCollection>(&body).map_err(Error::from)
-            })
+        self.get(&format!("channels/{}/posts", channel_id.as_str(),))
     }
 
     pub fn create_post(
@@ -359,5 +317,23 @@ impl Client {
                     })
             },
         )
+    }
+
+    fn get<'de, D>(&self, path: &str) -> impl Future<Item = D, Error = Error>
+    where
+        D: DeserializeOwned,
+    {
+        self.http
+            .get(path, &self.session_token)
+            .inspect(|res| {
+                eprintln!("Status:\n{}", res.status());
+                eprintln!("Headers:\n{:#?}", res.headers());
+            })
+            .and_then(|res| res.into_body().concat2().map_err(Error::from))
+            .and_then(|body| {
+                let b = std::str::from_utf8(&body).unwrap();
+                eprintln!("body = {}", b);
+                serde_json::from_slice::<D>(&body).map_err(Error::from)
+            })
     }
 }
